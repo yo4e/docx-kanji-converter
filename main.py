@@ -16,7 +16,7 @@ def convert_number_to_kanji(num_str):
         digit = int(ch)
         if digit != 0:
             if i > 0 and digit == 1:
-                # 十位以上で「1」は省略（例：11→「十一」となる）
+                # 十位以上で「1」は省略（例：11→「十一」）
                 result = units[i] + result
             else:
                 result = digits[digit] + units[i] + result
@@ -38,28 +38,38 @@ def convert_ascii_to_fullwidth(text):
 
 def insert_space_after_punctuation(text):
     """
-    「！」または「？」の直後で、次の文字が全角スペース、閉じ丸括弧、または閉じかぎかっこでない場合、
+    「！」または「？」の直後で、次の文字が「　」「）」「」」「』」でない場合、
     全角スペースを挿入する。
     """
-    return re.sub(r'([！？])(?![　）」])', r'\1　', text)
+    # (?![　）」』]) の部分に '』' を追加
+    return re.sub(r'([！？])(?![　）」』])', r'\1　', text)
 
 # Wordファイルを読み込み（適宜パスを変更してください）
 doc = Document("/Users/a104/Desktop/input.docx")
 
 for paragraph in doc.paragraphs:
-    # 段落の先頭が「「」または「（」で始まらない場合は、先頭に全角スペースを追加（字下げ）
-    if not (paragraph.text.startswith("「") or paragraph.text.startswith("（")):
-        paragraph.text = "　" + paragraph.text
+    # 段落スタイル名を取得（見出し/Headingかどうか）
+    style_name = paragraph.style.name if paragraph.style else ""
+
+    # 段落の先頭が「「」「（」「『」で始まるか、見出しスタイルなら字下げしない
+    if not (
+        style_name.startswith("見出し") or
+        style_name.startswith("Heading") or
+        paragraph.text.startswith("「") or
+        paragraph.text.startswith("（") or
+        paragraph.text.startswith("『")
+    ):
+        paragraph.text = "　" + paragraph.text  # 全角スペースで字下げ
 
     # 各Runごとにテキスト変換を実施
     for run in paragraph.runs:
         # 数字を漢数字に変換（複数桁対応）
         run.text = convert_numbers_in_text(run.text)
-        # 「...」を「……」に置換
-        run.text = run.text.replace("...", "……")
+        # 「…」を「……」に置換
+        run.text = run.text.replace("…", "……")
         # 半角英文字を全角英文字に変換
         run.text = convert_ascii_to_fullwidth(run.text)
-        # 「！」、「？」の後に全角スペースを挿入
+        # 「！」、「？」の後に全角スペースを挿入（ただし次が「　」「）」「」」「』」の場合は除く）
         run.text = insert_space_after_punctuation(run.text)
         # イタリックの場合は解除してボールドに変更
         if run.italic:
