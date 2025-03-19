@@ -1,5 +1,6 @@
 import re
 from docx import Document
+from docx.shared import Pt
 
 # 数字を漢数字に変換するための関数（最大9999まで対応）
 def convert_number_to_kanji(num_str):
@@ -41,7 +42,6 @@ def insert_space_after_punctuation(text):
     「！」または「？」の直後で、次の文字が「　」「）」「」」「』」でない場合、
     全角スペースを挿入する。
     """
-    # (?![　）」』]) の部分に '』' を追加
     return re.sub(r'([！？])(?![　）」』])', r'\1　', text)
 
 # Wordファイルを読み込み（適宜パスを変更してください）
@@ -50,7 +50,6 @@ doc = Document("/Users/a104/Desktop/input.docx")
 for paragraph in doc.paragraphs:
     # 段落スタイル名を取得（見出し/Headingかどうか）
     style_name = paragraph.style.name if paragraph.style else ""
-
     # 段落の先頭が「「」「（」「『」で始まるか、見出しスタイルなら字下げしない
     if not (
         style_name.startswith("見出し") or
@@ -75,6 +74,18 @@ for paragraph in doc.paragraphs:
         if run.italic:
             run.italic = False
             run.bold = True
+
+# すべてのRunのフォントとフォントサイズを統一する処理
+for paragraph in doc.paragraphs:
+    # 段落のスタイル名を取得（すでに取得している場合もありますが、ここでは再取得しています）
+    style_name = paragraph.style.name if paragraph.style else ""
+    for run in paragraph.runs:
+        run.font.name = "ヒラギノ明朝"  # フォント名をヒラギノ明朝に指定
+        # 見出しの場合はフォントサイズ24pt、本文は12ptに設定
+        if style_name.startswith("見出し") or style_name.startswith("Heading"):
+            run.font.size = Pt(24)
+        else:
+            run.font.size = Pt(12)
 
 # 処理後のドキュメントを保存（適宜パスを変更してください）
 doc.save("/Users/a104/Desktop/output.docx")
