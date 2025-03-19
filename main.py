@@ -80,7 +80,7 @@ for paragraph in doc.paragraphs:
     # 段落のスタイル名を取得（すでに取得している場合もありますが、ここでは再取得しています）
     style_name = paragraph.style.name if paragraph.style else ""
     for run in paragraph.runs:
-        run.font.name = "ヒラギノ明朝"  # フォント名をヒラギノ明朝に指定
+        run.font.name = "ヒラギノ明朝 proN"  # フォントをヒラギノ明朝に指定
         # 見出しの場合はフォントサイズ24pt、本文は12ptに設定
         if style_name.startswith("見出し") or style_name.startswith("Heading"):
             run.font.size = Pt(24)
