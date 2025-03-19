@@ -55,8 +55,8 @@ for paragraph in doc.paragraphs:
     for run in paragraph.runs:
         # 数字を漢数字に変換（複数桁対応）
         run.text = convert_numbers_in_text(run.text)
-        # 「…」を「……」に置換
-        run.text = run.text.replace("…", "……")
+        # 「...」を「……」に置換
+        run.text = run.text.replace("...", "……")
         # 半角英文字を全角英文字に変換
         run.text = convert_ascii_to_fullwidth(run.text)
         # 「！」、「？」の後に全角スペースを挿入
