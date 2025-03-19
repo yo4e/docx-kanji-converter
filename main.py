@@ -50,7 +50,7 @@ doc = Document("/Users/a104/Desktop/input.docx")
 for paragraph in doc.paragraphs:
     # 段落スタイル名を取得（見出し/Headingかどうか）
     style_name = paragraph.style.name if paragraph.style else ""
-    # 段落の先頭が「「」「（」「『」で始まるか、見出しスタイルなら字下げしない
+    # もし段落の先頭が「「」「（」「『」で始まるか、見出しスタイルなら字下げはしない
     if not (
         style_name.startswith("見出し") or
         style_name.startswith("Heading") or
@@ -58,14 +58,17 @@ for paragraph in doc.paragraphs:
         paragraph.text.startswith("（") or
         paragraph.text.startswith("『")
     ):
-        paragraph.text = "　" + paragraph.text  # 全角スペースで字下げ
+        # 直接paragraph.textを変更するとRunが再生成されるので、
+        # 既存の最初のRunのテキストに全角スペースを追加します。
+        if paragraph.runs:
+            paragraph.runs[0].text = "　" + paragraph.runs[0].text
 
     # 各Runごとにテキスト変換を実施
     for run in paragraph.runs:
         # 数字を漢数字に変換（複数桁対応）
         run.text = convert_numbers_in_text(run.text)
-        # 「…」を「……」に置換
-        run.text = run.text.replace("…", "……")
+        # 「...」を「……」に置換
+        run.text = run.text.replace("...", "……")
         # 半角英文字を全角英文字に変換
         run.text = convert_ascii_to_fullwidth(run.text)
         # 「！」、「？」の後に全角スペースを挿入（ただし次が「　」「）」「」」「』」の場合は除く）
@@ -75,16 +78,16 @@ for paragraph in doc.paragraphs:
             run.italic = False
             run.bold = True
 
-# すべてのRunのフォントとフォントサイズを統一する処理
+# 以下で、すべてのRunのフォント名のみをリセットします（フォントサイズやボールドはそのまま）
 for paragraph in doc.paragraphs:
-    # 段落のスタイル名を取得（すでに取得している場合もありますが、ここでは再取得しています）
-    style_name = paragraph.style.name if paragraph.style else ""
     for run in paragraph.runs:
-        run.font.name = "ヒラギノ明朝 proN"  # フォントをヒラギノ明朝に指定
-        # 見出しの場合はフォントサイズ24pt、本文は12ptに設定
-        if style_name.startswith("見出し") or style_name.startswith("Heading"):
-            run.font.size = Pt(24)
-        else:
+        run.font.name = None
+
+# 本文（見出し以外）のみ、フォントサイズを12ptに指定
+for paragraph in doc.paragraphs:
+    style_name = paragraph.style.name if paragraph.style else ""
+    if not (style_name.startswith("見出し") or style_name.startswith("Heading")):
+        for run in paragraph.runs:
             run.font.size = Pt(12)
 
 # 処理後のドキュメントを保存（適宜パスを変更してください）
