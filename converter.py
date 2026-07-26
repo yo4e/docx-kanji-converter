@@ -147,12 +147,37 @@ def is_heading(style_name: str) -> bool:
     return style_name.startswith(_HEADING_PREFIXES)
 
 
-def should_indent(style_name: str, text: str) -> bool:
+def is_heading_paragraph(paragraph) -> bool:
+    """Detect headings even when an import has flattened paragraph styles.
+
+    Apple Pages and some office converters export titles and section headings
+    with the ``Normal`` paragraph style while retaining bold, larger runs. Treat
+    a paragraph as a heading when it has an explicit heading style, or when all
+    non-empty runs are bold and at least one is 13pt or larger.
+    """
+
+    style_name = paragraph.style.name if paragraph.style else ""
+    if is_heading(style_name):
+        return True
+
+    content_runs = [run for run in paragraph.runs if run.text.strip()]
+    if not content_runs or not all(run.bold is True for run in content_runs):
+        return False
+
+    explicit_sizes = [
+        run.font.size.pt for run in content_runs if run.font.size is not None
+    ]
+    return bool(explicit_sizes) and max(explicit_sizes) >= 13
+
+
+def should_indent(
+    style_name: str, text: str, *, heading_like: bool = False
+) -> bool:
     """Return whether a paragraph should receive one full-width indent."""
 
     if not text or not text.strip():
         return False
-    if is_heading(style_name):
+    if heading_like or is_heading(style_name):
         return False
     return not text.startswith(_NO_INDENT_PREFIXES)
 
@@ -205,11 +230,14 @@ def process_document(
 
     for paragraph in document.paragraphs:
         style_name = paragraph.style.name if paragraph.style else ""
+        heading_like = is_heading_paragraph(paragraph)
 
         if (
             options.enabled(RULE_INDENT)
             and paragraph.runs
-            and should_indent(style_name, paragraph.text)
+            and should_indent(
+                style_name, paragraph.text, heading_like=heading_like
+            )
         ):
             paragraph.runs[0].text = "　" + paragraph.runs[0].text
             report.changes[RULE_INDENT] += 1
@@ -222,13 +250,17 @@ def process_document(
                 run.bold = True
                 report.changes[RULE_ITALIC] += 1
 
-            if options.enabled(RULE_FONT) and run.font.name is not None:
+            if (
+                options.enabled(RULE_FONT)
+                and not heading_like
+                and run.font.name is not None
+            ):
                 run.font.name = None
                 report.changes[RULE_FONT] += 1
 
             if (
                 options.enabled(RULE_FONT)
-                and not is_heading(style_name)
+                and not heading_like
                 and run.font.size != Pt(12)
             ):
                 run.font.size = Pt(12)
