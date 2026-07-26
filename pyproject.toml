@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docx-kanji-converter"
+version = "0.1.0"
+description = "A CLI preflight tool for Japanese fiction manuscripts in DOCX format"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["python-docx>=1.1,<2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+docx-kanji-converter = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "converter"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
