@@ -8,7 +8,14 @@ from zipfile import BadZipFile
 
 from docx.opc.exceptions import PackageNotFoundError
 
-from converter import ALL_RULES, ConversionOptions, convert_document
+from converter import (
+    ALL_RULES,
+    DEFAULT_LITERAL_REPLACEMENTS,
+    ConversionOptions,
+    convert_document,
+    load_literal_replacements,
+    merge_literal_replacements,
+)
 
 
 def default_output_path(input_path: Path) -> Path:
@@ -33,6 +40,17 @@ def build_parser() -> argparse.ArgumentParser:
         choices=ALL_RULES,
         metavar="RULE",
         help="Disable a conversion rule; may be repeated",
+    )
+    parser.add_argument(
+        "--replacement-file",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Load UTF-8 tab-separated literal replacements; may be repeated. "
+            "Later files override earlier entries with the same source."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -91,8 +109,15 @@ def main(argv: list[str] | None = None) -> int:
         force=args.force,
     )
 
-    options = ConversionOptions.with_disabled(args.disable)
     try:
+        replacements = DEFAULT_LITERAL_REPLACEMENTS
+        for replacement_path in args.replacement_file:
+            replacements = merge_literal_replacements(
+                replacements, load_literal_replacements(replacement_path)
+            )
+        options = ConversionOptions.with_disabled(
+            args.disable, literal_replacements=replacements
+        )
         report = convert_document(
             input_path,
             None if args.dry_run else output_path,
