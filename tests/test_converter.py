@@ -1,11 +1,17 @@
+from pathlib import Path
+
 import pytest
 
 from converter import (
+    DEFAULT_LITERAL_REPLACEMENTS,
     ConversionOptions,
+    LiteralReplacement,
     convert_ascii_to_fullwidth,
     convert_number_to_kanji,
     convert_numbers_in_text,
     insert_space_after_punctuation,
+    load_literal_replacements,
+    merge_literal_replacements,
     replace_ellipsis,
     should_indent,
 )
@@ -80,3 +86,35 @@ def test_options_can_disable_rules():
     assert not options.enabled("numbers")
     assert not options.enabled("font")
     assert options.enabled("indent")
+
+
+def test_default_replacements_include_percent_spellings():
+    assert LiteralReplacement("%", "パーセント") in DEFAULT_LITERAL_REPLACEMENTS
+    assert LiteralReplacement("％", "パーセント") in DEFAULT_LITERAL_REPLACEMENTS
+
+
+def test_load_literal_replacements_supports_comments_bom_and_empty_target(tmp_path: Path):
+    path = tmp_path / "rules.tsv"
+    path.write_text("\ufeff# comment\nAI\t人工知能\n削除\t\n", encoding="utf-8")
+
+    assert load_literal_replacements(path) == (
+        LiteralReplacement("AI", "人工知能"),
+        LiteralReplacement("削除", ""),
+    )
+
+
+def test_load_literal_replacements_rejects_lines_without_tab(tmp_path: Path):
+    path = tmp_path / "rules.tsv"
+    path.write_text("invalid", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="separated by a tab"):
+        load_literal_replacements(path)
+
+
+def test_merge_literal_replacements_uses_later_value_for_same_source():
+    merged = merge_literal_replacements(
+        [LiteralReplacement("%", "percent")],
+        [LiteralReplacement("%", "パーセント")],
+    )
+
+    assert merged == (LiteralReplacement("%", "パーセント"),)
