@@ -131,6 +131,27 @@ def test_bold_body_text_below_13pt_is_not_inferred_as_heading():
     assert run.font.size == Pt(12)
 
 
+def test_percent_is_spelled_out_before_number_conversion():
+    document = Document()
+    paragraph = document.add_paragraph("出力30%に上昇")
+
+    report = process_document(document)
+
+    assert paragraph.text == "　出力三十パーセントに上昇"
+    assert report.changes["replacements"] == 1
+    assert report.changes["numbers"] == 1
+
+
+def test_replacements_rule_can_be_disabled():
+    document = Document()
+    paragraph = document.add_paragraph("出力30%")
+    options = ConversionOptions.with_disabled(["replacements"])
+
+    process_document(document, options)
+
+    assert paragraph.text == "　出力三十%"
+
+
 def test_convert_document_dry_run_does_not_write_output(tmp_path: Path):
     source = tmp_path / "input.docx"
     output = tmp_path / "output.docx"
