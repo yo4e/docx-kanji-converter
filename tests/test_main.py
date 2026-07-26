@@ -63,3 +63,29 @@ def test_cli_reports_invalid_docx_without_traceback(tmp_path, capsys):
 
     assert error.value.code == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_cli_applies_custom_replacement_file(tmp_path):
+    source = tmp_path / "input.docx"
+    output = tmp_path / "output.docx"
+    rules = tmp_path / "rules.tsv"
+    document = Document()
+    document.add_paragraph("量子共鳴")
+    document.save(source)
+    rules.write_text("量子\tクォンタム\n", encoding="utf-8")
+
+    assert main([str(source), str(output), "--replacement-file", str(rules)]) == 0
+    assert Document(output).paragraphs[0].text == "　クォンタム共鳴"
+
+
+def test_cli_reports_invalid_replacement_file(tmp_path, capsys):
+    source = tmp_path / "input.docx"
+    rules = tmp_path / "rules.tsv"
+    Document().save(source)
+    rules.write_text("invalid", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        main([str(source), "--dry-run", "--replacement-file", str(rules)])
+
+    assert error.value.code == 1
+    assert "separated by a tab" in capsys.readouterr().err
