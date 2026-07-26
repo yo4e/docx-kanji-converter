@@ -81,6 +81,56 @@ def test_text_split_across_runs_is_not_joined_for_replacement():
     assert paragraph.text == "　..."
 
 
+def test_large_bold_normal_paragraph_is_treated_as_heading():
+    document = Document()
+    heading = document.add_paragraph()
+    heading.add_run("第")
+    heading.add_run("1")
+    heading.add_run("章：四つの目覚め")
+    for run in heading.runs:
+        run.bold = True
+        run.font.name = "ArialUnicodeMS"
+        run.font.size = Pt(17)
+
+    process_document(document)
+
+    assert heading.text == "第一章：四つの目覚め"
+    assert not heading.text.startswith("　")
+    for run in heading.runs:
+        assert run.font.name == "ArialUnicodeMS"
+        assert run.font.size == Pt(17)
+
+
+def test_bold_13pt_section_number_is_treated_as_heading():
+    document = Document()
+    heading = document.add_paragraph()
+    run = heading.add_run("2")
+    run.bold = True
+    run.font.name = "Arial-BoldMT"
+    run.font.size = Pt(13)
+
+    process_document(document)
+
+    assert heading.text == "二"
+    assert run.font.name == "Arial-BoldMT"
+    assert run.font.size == Pt(13)
+
+
+def test_bold_body_text_below_13pt_is_not_inferred_as_heading():
+    document = Document()
+    paragraph = document.add_paragraph()
+    run = paragraph.add_run("重要な本文")
+    run.bold = True
+    run.font.name = "ArialUnicodeMS"
+    run.font.size = Pt(11)
+
+    process_document(document)
+
+    assert paragraph.text == "　重要な本文"
+    assert run.font.name is None
+    assert run.font.size == Pt(12)
+
+
 def test_convert_document_dry_run_does_not_write_output(tmp_path: Path):
     source = tmp_path / "input.docx"
     output = tmp_path / "output.docx"
