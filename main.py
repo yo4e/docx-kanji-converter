@@ -1,94 +1,139 @@
-import re
-from docx import Document
-from docx.shared import Pt
+"""Command-line entry point for docx-kanji-converter."""
 
-# 数字を漢数字に変換するための関数（最大9999まで対応）
-def convert_number_to_kanji(num_str):
-    n = int(num_str)
-    if n == 0:
-        return "零"
-    result = ""
-    # 単位（1,10,100,1000）
-    units = ["", "十", "百", "千"]
-    digits = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
-    # 数字を逆順に処理（下位桁から上位桁へ）
-    num_str_rev = num_str[::-1]
-    for i, ch in enumerate(num_str_rev):
-        digit = int(ch)
-        if digit != 0:
-            if i > 0 and digit == 1:
-                # 十位以上で「1」は省略（例：11→「十一」）
-                result = units[i] + result
-            else:
-                result = digits[digit] + units[i] + result
-    return result
+from __future__ import annotations
 
-def convert_numbers_in_text(text):
-    """テキスト中の数字（連続した数字列）を漢数字に変換する。"""
-    return re.sub(r'\d+', lambda m: convert_number_to_kanji(m.group(0)), text)
+import argparse
+from pathlib import Path
+from zipfile import BadZipFile
 
-def convert_ascii_to_fullwidth(text):
-    """半角英文字を全角英文字に変換する。"""
-    result = ""
-    for char in text:
-        if ('A' <= char <= 'Z') or ('a' <= char <= 'z'):
-            result += chr(ord(char) + 0xFEE0)
-        else:
-            result += char
-    return result
+from docx.opc.exceptions import PackageNotFoundError
 
-def insert_space_after_punctuation(text):
-    """
-    「！」または「？」の直後で、次の文字が「　」「）」「」」「』」でない場合、
-    全角スペースを挿入する。
-    """
-    return re.sub(r'([！？])(?![　）」』])', r'\1　', text)
+from converter import (
+    ALL_RULES,
+    DEFAULT_LITERAL_REPLACEMENTS,
+    ConversionOptions,
+    convert_document,
+    load_literal_replacements,
+    merge_literal_replacements,
+)
 
-# Wordファイルを読み込み（適宜パスを変更してください）
-doc = Document("/Users/a104/Desktop/input.docx")
 
-for paragraph in doc.paragraphs:
-    # 段落スタイル名を取得（見出し/Headingかどうか）
-    style_name = paragraph.style.name if paragraph.style else ""
-    # もし段落の先頭が「「」「（」「『」で始まるか、見出しスタイルなら字下げはしない
-    if not (
-        style_name.startswith("見出し") or
-        style_name.startswith("Heading") or
-        paragraph.text.startswith("「") or
-        paragraph.text.startswith("（") or
-        paragraph.text.startswith("『")
-    ):
-        # 直接paragraph.textを変更するとRunが再生成されるので、
-        # 既存の最初のRunのテキストに全角スペースを追加します。
-        if paragraph.runs:
-            paragraph.runs[0].text = "　" + paragraph.runs[0].text
+def default_output_path(input_path: Path) -> Path:
+    return input_path.with_name(f"{input_path.stem}.converted{input_path.suffix}")
 
-    # 各Runごとにテキスト変換を実施
-    for run in paragraph.runs:
-        # 数字を漢数字に変換（複数桁対応）
-        run.text = convert_numbers_in_text(run.text)
-        # 「...」を「……」に置換
-        run.text = run.text.replace("...", "……")
-        # 半角英文字を全角英文字に変換
-        run.text = convert_ascii_to_fullwidth(run.text)
-        # 「！」、「？」の後に全角スペースを挿入（ただし次が「　」「）」「」」「』」の場合は除く）
-        run.text = insert_space_after_punctuation(run.text)
-        # イタリックの場合は解除してボールドに変更
-        if run.italic:
-            run.italic = False
-            run.bold = True
 
-# 以下で、すべてのRunのフォント名のみをリセットします（フォントサイズやボールドはそのまま）
-for paragraph in doc.paragraphs:
-    for run in paragraph.runs:
-        run.font.name = None
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Apply Japanese fiction manuscript formatting rules to a DOCX file."
+    )
+    parser.add_argument("input", type=Path, help="Input .docx file")
+    parser.add_argument(
+        "output",
+        type=Path,
+        nargs="?",
+        help="Output .docx file (default: <input>.converted.docx)",
+    )
+    parser.add_argument(
+        "--disable",
+        action="append",
+        default=[],
+        choices=ALL_RULES,
+        metavar="RULE",
+        help="Disable a conversion rule; may be repeated",
+    )
+    parser.add_argument(
+        "--replacement-file",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Load UTF-8 tab-separated literal replacements; may be repeated. "
+            "Later files override earlier entries with the same source."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report changes without writing an output file",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow replacing an existing output file",
+    )
+    return parser
 
-# 本文（見出し以外）のみ、フォントサイズを12ptに指定
-for paragraph in doc.paragraphs:
-    style_name = paragraph.style.name if paragraph.style else ""
-    if not (style_name.startswith("見出し") or style_name.startswith("Heading")):
-        for run in paragraph.runs:
-            run.font.size = Pt(12)
 
-# 処理後のドキュメントを保存（適宜パスを変更してください）
-doc.save("/Users/a104/Desktop/output.docx")
+def validate_paths(
+    parser: argparse.ArgumentParser,
+    input_path: Path,
+    output_path: Path,
+    *,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    if not input_path.is_file():
+        parser.error(f"input file does not exist: {input_path}")
+    if input_path.suffix.lower() != ".docx":
+        parser.error("input file must have a .docx extension")
+
+    if dry_run:
+        return
+
+    try:
+        same_file = input_path.resolve() == output_path.resolve()
+    except OSError:
+        same_file = input_path.absolute() == output_path.absolute()
+    if same_file:
+        parser.error("refusing to overwrite the input file")
+    if output_path.exists() and not force:
+        parser.error(f"output file already exists: {output_path} (use --force to replace it)")
+    if output_path.suffix.lower() != ".docx":
+        parser.error("output file must have a .docx extension")
+    if not output_path.parent.exists():
+        parser.error(f"output directory does not exist: {output_path.parent}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    input_path: Path = args.input
+    output_path: Path = args.output or default_output_path(input_path)
+    validate_paths(
+        parser,
+        input_path,
+        output_path,
+        dry_run=args.dry_run,
+        force=args.force,
+    )
+
+    try:
+        replacements = DEFAULT_LITERAL_REPLACEMENTS
+        for replacement_path in args.replacement_file:
+            replacements = merge_literal_replacements(
+                replacements, load_literal_replacements(replacement_path)
+            )
+        options = ConversionOptions.with_disabled(
+            args.disable, literal_replacements=replacements
+        )
+        report = convert_document(
+            input_path,
+            None if args.dry_run else output_path,
+            options=options,
+            dry_run=args.dry_run,
+        )
+    except (BadZipFile, PackageNotFoundError, OSError, ValueError) as error:
+        parser.exit(1, f"error: {error}\n")
+
+    print(report.format_text())
+    if args.dry_run:
+        print("Dry run: no output file was written.")
+    else:
+        print(f"Saved: {output_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
