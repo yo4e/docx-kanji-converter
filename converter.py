@@ -19,6 +19,7 @@ RULE_ASCII = "ascii"
 RULE_PUNCTUATION = "punctuation"
 RULE_ITALIC = "italic"
 RULE_FONT = "font"
+RULE_REPLACEMENTS = "replacements"
 
 ALL_RULES = (
     RULE_INDENT,
@@ -28,6 +29,7 @@ ALL_RULES = (
     RULE_PUNCTUATION,
     RULE_ITALIC,
     RULE_FONT,
+    RULE_REPLACEMENTS,
 )
 
 _NUMBER_PATTERN = re.compile(r"[0-9]+")
@@ -43,19 +45,91 @@ _ASCII_FULLWIDTH_TRANSLATION = str.maketrans(
 
 
 @dataclass(frozen=True)
+class LiteralReplacement:
+    """One exact text replacement applied before the built-in text rules."""
+
+    source: str
+    target: str
+
+    def __post_init__(self) -> None:
+        if not self.source:
+            raise ValueError("replacement source must not be empty")
+
+
+DEFAULT_LITERAL_REPLACEMENTS = (
+    LiteralReplacement("%", "パーセント"),
+    LiteralReplacement("％", "パーセント"),
+)
+
+
+def merge_literal_replacements(
+    *groups: Iterable[LiteralReplacement],
+) -> tuple[LiteralReplacement, ...]:
+    """Merge replacement groups, letting later entries override a source."""
+
+    merged: dict[str, str] = {}
+    for group in groups:
+        for replacement in group:
+            merged[replacement.source] = replacement.target
+    return tuple(
+        LiteralReplacement(source, target) for source, target in merged.items()
+    )
+
+
+def load_literal_replacements(path: Path) -> tuple[LiteralReplacement, ...]:
+    """Load UTF-8 tab-separated replacement rules.
+
+    Empty lines and lines beginning with ``#`` are ignored. Each remaining line
+    must contain ``source<TAB>target``. An empty target is allowed so a source can
+    be deleted, but an empty source is rejected.
+    """
+
+    replacements: list[LiteralReplacement] = []
+    text = path.read_text(encoding="utf-8-sig")
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        if "\t" not in raw_line:
+            raise ValueError(
+                f"{path}:{line_number}: expected source and target separated by a tab"
+            )
+        source, target = raw_line.split("\t", 1)
+        if not source:
+            raise ValueError(f"{path}:{line_number}: replacement source is empty")
+        replacements.append(LiteralReplacement(source, target))
+    return tuple(replacements)
+
+
+@dataclass(frozen=True)
 class ConversionOptions:
     """Rules enabled for one conversion run."""
 
     enabled_rules: frozenset[str] = frozenset(ALL_RULES)
+    literal_replacements: tuple[LiteralReplacement, ...] = (
+        DEFAULT_LITERAL_REPLACEMENTS
+    )
 
     @classmethod
-    def with_disabled(cls, disabled_rules: Iterable[str]) -> "ConversionOptions":
+    def with_disabled(
+        cls,
+        disabled_rules: Iterable[str],
+        *,
+        literal_replacements: Iterable[LiteralReplacement] | None = None,
+    ) -> "ConversionOptions":
         disabled = frozenset(disabled_rules)
         unknown = disabled.difference(ALL_RULES)
         if unknown:
             names = ", ".join(sorted(unknown))
             raise ValueError(f"Unknown conversion rule(s): {names}")
-        return cls(frozenset(ALL_RULES).difference(disabled))
+        replacements = (
+            DEFAULT_LITERAL_REPLACEMENTS
+            if literal_replacements is None
+            else tuple(literal_replacements)
+        )
+        return cls(
+            frozenset(ALL_RULES).difference(disabled),
+            tuple(replacements),
+        )
 
     def enabled(self, rule: str) -> bool:
         return rule in self.enabled_rules
@@ -185,6 +259,15 @@ def should_indent(
 def _apply_text_rules(
     text: str, options: ConversionOptions, report: ConversionReport
 ) -> str:
+    if options.enabled(RULE_REPLACEMENTS):
+        for replacement in options.literal_replacements:
+            if replacement.source == replacement.target:
+                continue
+            count = text.count(replacement.source)
+            if count:
+                text = text.replace(replacement.source, replacement.target)
+                report.changes[RULE_REPLACEMENTS] += count
+
     if options.enabled(RULE_NUMBERS):
         skipped_large = sum(
             1 for match in _NUMBER_PATTERN.finditer(text) if len(match.group(0)) > 4
